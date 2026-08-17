@@ -37,6 +37,17 @@ test("admin setup and complete license lifecycle", async (context) => {
     rmSync(dataDirectory, { recursive: true, force: true });
   });
 
+  const corsPreflight = await fetch(`${baseUrl}/api/license/verify`, {
+    method: "OPTIONS",
+    headers: {
+      origin: "tauri://localhost",
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "authorization, content-type",
+    },
+  });
+  assert.equal(corsPreflight.status, 204);
+  assert.equal(corsPreflight.headers.get("access-control-allow-origin"), "tauri://localhost");
+
   const health = await jsonRequest(baseUrl, "/api/health");
   assert.equal(health.response.status, 200);
   assert.equal(health.body.status, "ok");
@@ -75,6 +86,7 @@ test("admin setup and complete license lifecycle", async (context) => {
   });
   assert.equal(createLicense.response.status, 201);
   assert.match(createLicense.body.licenseKey, /^AQ-(?:[A-Z2-9]{4}-){3}[A-Z2-9]{4}$/);
+  assert.equal(createLicense.body.license.licenseKey, createLicense.body.licenseKey);
   assert.equal(createLicense.body.license.deviceCount, 0);
 
   const activation = await jsonRequest(baseUrl, "/api/license/activate", {
@@ -110,4 +122,16 @@ test("admin setup and complete license lifecycle", async (context) => {
     body: "{}",
   });
   assert.equal(verifyAfterRevoke.response.status, 401);
+
+  const deleteLicense = await jsonRequest(baseUrl, `/api/admin/licenses/${createLicense.body.license.id}`, {
+    method: "DELETE",
+    headers: { cookie },
+    body: "{}",
+  });
+  assert.equal(deleteLicense.response.status, 204);
+
+  const licensesAfterDelete = await jsonRequest(baseUrl, "/api/admin/licenses", {
+    headers: { cookie },
+  });
+  assert.equal(licensesAfterDelete.body.licenses.length, 0);
 });

@@ -31,7 +31,7 @@ async function api(path, options = {}) {
 }
 
 function formatDate(value) {
-  if (!value) return "ไม่หมดอายุ";
+  if (!value) return "Never expires";
   return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium" }).format(new Date(value));
 }
 
@@ -41,19 +41,25 @@ function escapeText(value) {
   return element.innerHTML;
 }
 
+function visibleKey(license) {
+  return license.licenseKey || `AQ-....-....-....-${license.keyLast4}`;
+}
+
 function renderLicenses() {
   const body = document.querySelector("#license-table-body");
   const empty = document.querySelector("#empty-state");
   body.innerHTML = licenses.map((license) => `
     <tr>
-      <td>${escapeText(license.label || "ไม่มีชื่อ")}</td>
-      <td><code>AQ-••••-••••-••••-${escapeText(license.keyLast4)}</code></td>
-      <td><span class="status ${license.status}">${license.status === "active" ? "ใช้งานได้" : "ระงับ"}</span></td>
+      <td>${escapeText(license.label || "No label")}</td>
+      <td><code>${escapeText(visibleKey(license))}</code></td>
+      <td><span class="status ${license.status}">${license.status === "active" ? "Active" : "Revoked"}</span></td>
       <td>${escapeText(formatDate(license.expiresAt))}</td>
       <td>${license.deviceCount} / ${license.deviceLimit}</td>
       <td><div class="row-actions">
-        ${license.deviceCount ? `<button class="button ghost" data-reset="${license.id}">ล้างเครื่อง</button>` : ""}
-        <button class="button ${license.status === "active" ? "danger" : "ghost"}" data-toggle="${license.id}" data-status="${license.status}">${license.status === "active" ? "ระงับ" : "เปิดใช้"}</button>
+        ${license.licenseKey ? `<button class="button ghost" data-copy-license="${license.id}">Copy</button>` : ""}
+        ${license.deviceCount ? `<button class="button ghost" data-reset="${license.id}">Reset devices</button>` : ""}
+        <button class="button ${license.status === "active" ? "danger" : "ghost"}" data-toggle="${license.id}" data-status="${license.status}">${license.status === "active" ? "Revoke" : "Activate"}</button>
+        <button class="button danger" data-delete="${license.id}">Delete</button>
       </div></td>
     </tr>
   `).join("");
@@ -88,7 +94,7 @@ async function initialize() {
       showView("login");
     }
   } catch (error) {
-    views.loading.querySelector("p").textContent = `เชื่อมต่อ API ไม่สำเร็จ: ${error.message}`;
+    views.loading.querySelector("p").textContent = `Cannot connect to API: ${error.message}`;
   }
 }
 
@@ -96,7 +102,7 @@ document.querySelector("#setup-form").addEventListener("submit", async (event) =
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
-  setMessage(form, "กำลังสร้างบัญชี…");
+  setMessage(form, "Creating admin account...");
   try {
     await api("/api/setup", { method: "POST", body: JSON.stringify(data) });
     form.reset();
@@ -110,7 +116,7 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
-  setMessage(form, "กำลังเข้าสู่ระบบ…");
+  setMessage(form, "Signing in...");
   try {
     await api("/api/admin/login", { method: "POST", body: JSON.stringify(data) });
     form.reset();
@@ -138,7 +144,7 @@ document.querySelector("#create-license-form").addEventListener("submit", async 
     expiresInDays: Number(formData.get("expiresInDays")),
     deviceLimit: Number(formData.get("deviceLimit")),
   };
-  setMessage(form, "กำลังสร้าง Key…");
+  setMessage(form, "Creating key...");
   try {
     const result = await api("/api/admin/licenses", { method: "POST", body: JSON.stringify(data) });
     licenses.unshift(result.license);
@@ -157,8 +163,8 @@ document.querySelector("#create-license-form").addEventListener("submit", async 
 
 document.querySelector("#copy-key-button").addEventListener("click", async (event) => {
   await navigator.clipboard.writeText(document.querySelector("#new-license-key").textContent);
-  event.currentTarget.textContent = "คัดลอกแล้ว";
-  setTimeout(() => { event.currentTarget.textContent = "คัดลอก"; }, 1500);
+  event.currentTarget.textContent = "Copied";
+  setTimeout(() => { event.currentTarget.textContent = "Copy"; }, 1500);
 });
 
 document.querySelector("#refresh-button").addEventListener("click", loadDashboard);
@@ -166,7 +172,19 @@ document.querySelector("#refresh-button").addEventListener("click", loadDashboar
 document.querySelector("#license-table-body").addEventListener("click", async (event) => {
   const toggleButton = event.target.closest("[data-toggle]");
   const resetButton = event.target.closest("[data-reset]");
+  const copyButton = event.target.closest("[data-copy-license]");
+  const deleteButton = event.target.closest("[data-delete]");
   try {
+    if (copyButton) {
+      const license = licenses.find((item) => item.id === copyButton.dataset.copyLicense);
+      if (license?.licenseKey) {
+        await navigator.clipboard.writeText(license.licenseKey);
+        copyButton.textContent = "Copied";
+        setTimeout(() => { copyButton.textContent = "Copy"; }, 1500);
+      }
+      return;
+    }
+
     if (toggleButton) {
       const status = toggleButton.dataset.status === "active" ? "revoked" : "active";
       const result = await api(`/api/admin/licenses/${toggleButton.dataset.toggle}`, {
@@ -175,14 +193,26 @@ document.querySelector("#license-table-body").addEventListener("click", async (e
       });
       licenses = licenses.map((item) => item.id === result.license.id ? result.license : item);
       renderLicenses();
+      return;
     }
-    if (resetButton && confirm("ล้างการผูกเครื่องทั้งหมดของ License นี้หรือไม่?")) {
+
+    if (resetButton && confirm("Reset all activated devices for this license?")) {
       await api(`/api/admin/licenses/${resetButton.dataset.reset}/devices`, {
         method: "DELETE",
         body: "{}",
       });
       const result = await api("/api/admin/licenses");
       licenses = result.licenses;
+      renderLicenses();
+      return;
+    }
+
+    if (deleteButton && confirm("Delete this license key? This cannot be undone.")) {
+      await api(`/api/admin/licenses/${deleteButton.dataset.delete}`, {
+        method: "DELETE",
+        body: "{}",
+      });
+      licenses = licenses.filter((item) => item.id !== deleteButton.dataset.delete);
       renderLicenses();
     }
   } catch (error) {

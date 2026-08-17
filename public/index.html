@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Auto Quest · Admin</title>
+    <title>Auto Quest Admin</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
@@ -15,28 +15,28 @@
         </a>
         <div id="admin-profile" class="admin-profile hidden">
           <span id="admin-email"></span>
-          <button id="logout-button" class="button ghost" type="button">ออกจากระบบ</button>
+          <button id="logout-button" class="button ghost" type="button">Logout</button>
         </div>
       </header>
 
       <section id="loading-view" class="center-card">
         <span class="loader"></span>
-        <p>กำลังเชื่อมต่อ API…</p>
+        <p>Connecting to API...</p>
       </section>
 
       <section id="setup-view" class="auth-layout hidden">
         <div class="intro">
           <span class="eyebrow">FIRST-TIME SETUP</span>
-          <h1>สร้างบัญชีผู้ดูแลระบบ</h1>
-          <p>Setup Token จะแสดงในหน้าต่าง Terminal ที่กำลังรัน API และใช้ได้เฉพาะก่อนสร้างแอดมินคนแรก</p>
-          <div class="security-note">รหัสผ่านและ License Key จะไม่ถูกเก็บเป็นข้อความธรรมดา</div>
+          <h1>Create the first admin account</h1>
+          <p>Use the setup token from your server environment. This setup is available only before the first admin is created.</p>
+          <div class="security-note">Passwords are hashed. License keys are stored for admin viewing from this version onward.</div>
         </div>
         <form id="setup-form" class="card form-card">
-          <h2>ตั้งค่าเจ้าของระบบ</h2>
+          <h2>Owner setup</h2>
           <label>Setup Token<input name="setupToken" type="password" autocomplete="off" required /></label>
-          <label>อีเมลแอดมิน<input name="email" type="email" autocomplete="email" required /></label>
-          <label>รหัสผ่าน<input name="password" type="password" minlength="10" autocomplete="new-password" required /></label>
-          <button class="button primary" type="submit">สร้างบัญชี Admin</button>
+          <label>Admin Email<input name="email" type="email" autocomplete="email" required /></label>
+          <label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required /></label>
+          <button class="button primary" type="submit">Create Admin</button>
           <p class="form-message" aria-live="polite"></p>
         </form>
       </section>
@@ -44,58 +44,83 @@
       <section id="login-view" class="auth-layout hidden">
         <div class="intro">
           <span class="eyebrow">ADMIN CONSOLE</span>
-          <h1>จัดการ License จากที่เดียว</h1>
-          <p>สร้าง Key กำหนดวันหมดอายุ จำกัดจำนวนเครื่อง และระงับสิทธิ์ได้ทันที</p>
+          <h1>Manage license keys</h1>
+          <p>Create keys, set expiry dates, limit devices, reset device bindings, revoke access, and delete unused keys.</p>
         </div>
         <form id="login-form" class="card form-card">
-          <h2>เข้าสู่ระบบ</h2>
-          <label>อีเมล<input name="email" type="email" autocomplete="email" required /></label>
-          <label>รหัสผ่าน<input name="password" type="password" autocomplete="current-password" required /></label>
-          <button class="button primary" type="submit">เข้าสู่หน้า Admin</button>
+          <h2>Admin login</h2>
+          <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
+          <button class="button primary" type="submit">Open Dashboard</button>
           <p class="form-message" aria-live="polite"></p>
         </form>
       </section>
 
       <section id="dashboard-view" class="dashboard hidden">
         <div class="hero">
-          <div><span class="eyebrow">LICENSE CONTROL</span><h1>License Dashboard</h1><p>ออกและควบคุมสิทธิ์เข้าใช้งานแอปบนคอม</p></div>
-          <button id="open-create-button" class="button primary" type="button">+ สร้าง License Key</button>
+          <div>
+            <span class="eyebrow">LICENSE CONTROL</span>
+            <h1>License Dashboard</h1>
+            <p>Issue and control access for DEVIL AUTO-QUEST Discord.</p>
+          </div>
+          <button id="open-create-button" class="button primary" type="button">+ Create License Key</button>
         </div>
 
         <div class="metrics">
-          <article><span>ทั้งหมด</span><strong id="metric-total">0</strong></article>
-          <article><span>ใช้งานได้</span><strong id="metric-active">0</strong></article>
-          <article><span>ระงับแล้ว</span><strong id="metric-revoked">0</strong></article>
-          <article><span>เครื่องที่เปิดใช้</span><strong id="metric-devices">0</strong></article>
+          <article><span>Total</span><strong id="metric-total">0</strong></article>
+          <article><span>Active</span><strong id="metric-active">0</strong></article>
+          <article><span>Revoked</span><strong id="metric-revoked">0</strong></article>
+          <article><span>Activated devices</span><strong id="metric-devices">0</strong></article>
         </div>
 
         <div id="key-reveal" class="key-reveal hidden">
-          <div><span>License Key ใหม่ — จะแสดงครั้งเดียว</span><code id="new-license-key"></code></div>
-          <button id="copy-key-button" class="button light" type="button">คัดลอก</button>
+          <div>
+            <span>New license key</span>
+            <code id="new-license-key"></code>
+          </div>
+          <button id="copy-key-button" class="button light" type="button">Copy</button>
         </div>
 
         <div class="card table-card">
-          <div class="table-heading"><div><h2>License Keys</h2><p>ระบบแสดงเฉพาะ 4 ตัวท้ายเพื่อความปลอดภัย</p></div><button id="refresh-button" class="button ghost" type="button">รีเฟรช</button></div>
+          <div class="table-heading">
+            <div>
+              <h2>License Keys</h2>
+              <p>New keys show the full value. Older keys created before this update still show only the last 4 characters.</p>
+            </div>
+            <button id="refresh-button" class="button ghost" type="button">Refresh</button>
+          </div>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>ชื่อ</th><th>Key</th><th>สถานะ</th><th>วันหมดอายุ</th><th>เครื่อง</th><th></th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Key</th>
+                  <th>Status</th>
+                  <th>Expires</th>
+                  <th>Devices</th>
+                  <th></th>
+                </tr>
+              </thead>
               <tbody id="license-table-body"></tbody>
             </table>
           </div>
-          <div id="empty-state" class="empty-state hidden">ยังไม่มี License — เริ่มต้นด้วยการสร้าง Key แรก</div>
+          <div id="empty-state" class="empty-state hidden">No licenses yet. Create your first key to begin.</div>
         </div>
       </section>
     </main>
 
     <dialog id="create-dialog">
       <form id="create-license-form" class="dialog-card">
-        <div class="dialog-heading"><div><span class="eyebrow">NEW LICENSE</span><h2>สร้าง License Key</h2></div><button id="close-create-button" class="icon-button" type="button" aria-label="ปิด">×</button></div>
-        <label>ชื่อหรือหมายเหตุ<input name="label" maxlength="100" placeholder="เช่น ลูกค้า A" /></label>
-        <div class="form-grid">
-          <label>อายุการใช้งาน (วัน)<input name="expiresInDays" type="number" min="1" max="3650" value="30" required /></label>
-          <label>จำนวนเครื่อง<input name="deviceLimit" type="number" min="1" max="20" value="1" required /></label>
+        <div class="dialog-heading">
+          <div><span class="eyebrow">NEW LICENSE</span><h2>Create License Key</h2></div>
+          <button id="close-create-button" class="icon-button" type="button" aria-label="Close">x</button>
         </div>
-        <button class="button primary" type="submit">สร้าง Key</button>
+        <label>Name or note<input name="label" maxlength="100" placeholder="Customer A" /></label>
+        <div class="form-grid">
+          <label>Expiry in days<input name="expiresInDays" type="number" min="1" max="3650" value="30" required /></label>
+          <label>Device limit<input name="deviceLimit" type="number" min="1" max="20" value="1" required /></label>
+        </div>
+        <button class="button primary" type="submit">Create Key</button>
         <p class="form-message" aria-live="polite"></p>
       </form>
     </dialog>

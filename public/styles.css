@@ -67,7 +67,7 @@ td:first-child { color: #202a40; font-weight: 700; }
 .status { display: inline-flex; padding: 5px 9px; border-radius: 99px; font-size: 11px; font-weight: 800; }
 .status.active { color: #087359; background: #e5f7f1; }
 .status.revoked { color: #b53b50; background: #fdebef; }
-.row-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .row-actions button { min-height: 34px; padding: 0 11px; font-size: 12px; }
 .empty-state { padding: 50px; text-align: center; color: #848ca0; }
 dialog { width: min(520px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 22px; box-shadow: 0 35px 100px #111a3c59; }

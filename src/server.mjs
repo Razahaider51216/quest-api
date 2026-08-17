@@ -18,6 +18,7 @@ import {
 
 const ADMIN_COOKIE = "aq_admin_session";
 const JSON_LIMIT = 32 * 1024;
+const LICENSE_SESSION_HOURS = 24 * 30;
 const rateBuckets = new Map();
 
 function nowIso() {
@@ -46,6 +47,14 @@ function sendEmpty(response, status, headers = {}) {
 
 function apiError(response, status, code, message) {
   sendJson(response, status, { error: { code, message } });
+}
+
+function setLicenseCorsHeaders(response, request) {
+  response.setHeader("access-control-allow-origin", request.headers.origin || "*");
+  response.setHeader("access-control-allow-methods", "POST, OPTIONS");
+  response.setHeader("access-control-allow-headers", "content-type, authorization");
+  response.setHeader("access-control-max-age", "86400");
+  response.setHeader("vary", "Origin");
 }
 
 async function readJson(request) {
@@ -156,6 +165,7 @@ function requireAdmin(request, response, database, config) {
 function licenseView(row) {
   return {
     id: row.id,
+    licenseKey: row.key_value ?? null,
     keyLast4: row.key_last4,
     label: row.label,
     status: row.status,
@@ -230,6 +240,15 @@ export function createApp(overrides = {}) {
   const requestHandler = async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
     const { pathname } = url;
+    const licenseApiRequest = pathname.startsWith("/api/license/");
+
+    if (licenseApiRequest) {
+      setLicenseCorsHeaders(response, request);
+      if (request.method === "OPTIONS") {
+        sendEmpty(response, 204);
+        return;
+      }
+    }
 
     try {
       if (request.method === "GET" && (await serveStatic(response, config, pathname))) return;
@@ -366,11 +385,12 @@ export function createApp(overrides = {}) {
         const id = randomUUID();
         database.prepare(`
           INSERT INTO licenses
-            (id, key_hash, key_last4, label, status, expires_at, device_limit, created_at, updated_at)
-          VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+            (id, key_hash, key_value, key_last4, label, status, expires_at, device_limit, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
         `).run(
           id,
           hashLicenseKey(licenseKey, config.licensePepper),
+          licenseKey,
           licenseKey.slice(-4),
           label,
           expiresAt,
@@ -387,6 +407,23 @@ export function createApp(overrides = {}) {
       }
 
       const licenseAdminMatch = /^\/api\/admin\/licenses\/([0-9a-f-]+)$/i.exec(pathname);
+      if (request.method === "DELETE" && licenseAdminMatch) {
+        assertSameOrigin(request);
+        const admin = requireAdmin(request, response, database, config);
+        if (!admin) return;
+        const id = licenseAdminMatch[1];
+        const existing = database.prepare("SELECT id FROM licenses WHERE id = ?").get(id);
+        if (!existing) {
+          apiError(response, 404, "LICENSE_NOT_FOUND", "License was not found");
+          return;
+        }
+        database.prepare("DELETE FROM license_sessions WHERE license_id = ?").run(id);
+        database.prepare("DELETE FROM license_devices WHERE license_id = ?").run(id);
+        database.prepare("DELETE FROM licenses WHERE id = ?").run(id);
+        sendEmpty(response, 204);
+        return;
+      }
+
       if (request.method === "PATCH" && licenseAdminMatch) {
         assertSameOrigin(request);
         const admin = requireAdmin(request, response, database, config);
@@ -493,7 +530,7 @@ export function createApp(overrides = {}) {
           .run(license.id, deviceId);
         const accessToken = randomToken();
         const createdAt = nowIso();
-        const sessionExpiresAt = addHours(24);
+        const sessionExpiresAt = addHours(LICENSE_SESSION_HOURS);
         database.prepare(`
           INSERT INTO license_sessions
             (token_hash, license_id, device_id, created_at, expires_at, last_seen_at)

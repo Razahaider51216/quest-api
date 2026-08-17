@@ -62,6 +62,13 @@ export function openDatabase(path) {
     CREATE INDEX IF NOT EXISTS idx_license_sessions_license_id
       ON license_sessions(license_id);
   `);
+
+  const licenseColumns = database.prepare("PRAGMA table_info(licenses)").all()
+    .map((column) => column.name);
+  if (!licenseColumns.includes("key_value")) {
+    database.exec("ALTER TABLE licenses ADD COLUMN key_value TEXT;");
+  }
+
   return database;
 }
 
