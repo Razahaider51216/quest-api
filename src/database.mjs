@@ -30,6 +30,7 @@ export function openDatabase(path) {
       key_last4 TEXT NOT NULL,
       label TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+      role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('customer', 'developer')),
       expires_at TEXT,
       device_limit INTEGER NOT NULL DEFAULT 1 CHECK (device_limit BETWEEN 1 AND 20),
       created_at TEXT NOT NULL,
@@ -57,6 +58,12 @@ export function openDatabase(path) {
       FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_license_devices_license_id
       ON license_devices(license_id);
     CREATE INDEX IF NOT EXISTS idx_license_sessions_license_id
@@ -67,6 +74,22 @@ export function openDatabase(path) {
     .map((column) => column.name);
   if (!licenseColumns.includes("key_value")) {
     database.exec("ALTER TABLE licenses ADD COLUMN key_value TEXT;");
+  }
+  if (!licenseColumns.includes("role")) {
+    database.exec("ALTER TABLE licenses ADD COLUMN role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('customer', 'developer'));");
+  }
+
+  const now = new Date().toISOString();
+  const defaults = [
+    ["version_label", "v0.10.0"],
+    ["discord_contact_url", ""],
+  ];
+  const insertSetting = database.prepare(`
+    INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+  `);
+  for (const [key, value] of defaults) {
+    insertSetting.run(key, value, now);
   }
 
   return database;

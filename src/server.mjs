@@ -49,7 +49,7 @@ function apiError(response, status, code, message) {
   sendJson(response, status, { error: { code, message } });
 }
 
-function setLicenseCorsHeaders(response, request) {
+function setPublicCorsHeaders(response, request) {
   response.setHeader("access-control-allow-origin", request.headers.origin || "*");
   response.setHeader("access-control-allow-methods", "POST, OPTIONS");
   response.setHeader("access-control-allow-headers", "content-type, authorization");
@@ -169,6 +169,7 @@ function licenseView(row) {
     keyLast4: row.key_last4,
     label: row.label,
     status: row.status,
+    role: row.role ?? "customer",
     expiresAt: row.expires_at,
     deviceLimit: row.device_limit,
     deviceCount: row.device_count ?? 0,
@@ -185,6 +186,55 @@ function getLicenseWithCount(database, id) {
     WHERE licenses.id = ?
     GROUP BY licenses.id
   `).get(id);
+}
+
+function appSettingsView(database) {
+  const rows = database.prepare("SELECT key, value, updated_at FROM app_settings").all();
+  const settings = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  const updatedAt = rows.reduce((latest, row) => {
+    if (!latest || row.updated_at > latest) return row.updated_at;
+    return latest;
+  }, null);
+  return {
+    versionLabel: settings.version_label || "v0.10.0",
+    discordContactUrl: settings.discord_contact_url || "",
+    updatedAt,
+  };
+}
+
+function validateDiscordContactUrl(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    const error = new Error("Discord contact URL must be a valid URL");
+    error.status = 400;
+    error.code = "INVALID_DISCORD_URL";
+    throw error;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    const error = new Error("Discord contact URL must start with http or https");
+    error.status = 400;
+    error.code = "INVALID_DISCORD_URL";
+    throw error;
+  }
+  return text.slice(0, 500);
+}
+
+function saveAppSettings(database, body) {
+  const versionLabel = String(body.versionLabel ?? "").trim().slice(0, 30) || "v0.10.0";
+  const discordContactUrl = validateDiscordContactUrl(body.discordContactUrl);
+  const updatedAt = nowIso();
+  const statement = database.prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `);
+  statement.run("version_label", versionLabel, updatedAt);
+  statement.run("discord_contact_url", discordContactUrl, updatedAt);
+  return appSettingsView(database);
 }
 
 function validateLicense(row) {
@@ -240,10 +290,10 @@ export function createApp(overrides = {}) {
   const requestHandler = async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
     const { pathname } = url;
-    const licenseApiRequest = pathname.startsWith("/api/license/");
+    const publicApiRequest = pathname.startsWith("/api/license/") || pathname === "/api/app-config";
 
-    if (licenseApiRequest) {
-      setLicenseCorsHeaders(response, request);
+    if (publicApiRequest) {
+      setPublicCorsHeaders(response, request);
       if (request.method === "OPTIONS") {
         sendEmpty(response, 204);
         return;
@@ -255,6 +305,11 @@ export function createApp(overrides = {}) {
 
       if (request.method === "GET" && pathname === "/api/health") {
         sendJson(response, 200, { status: "ok", service: "auto-quest-license-api" });
+        return;
+      }
+
+      if (request.method === "GET" && pathname === "/api/app-config") {
+        sendJson(response, 200, { app: appSettingsView(database) });
         return;
       }
 
@@ -346,6 +401,22 @@ export function createApp(overrides = {}) {
         return;
       }
 
+      if (request.method === "GET" && pathname === "/api/admin/settings") {
+        const admin = requireAdmin(request, response, database, config);
+        if (!admin) return;
+        sendJson(response, 200, { app: appSettingsView(database) });
+        return;
+      }
+
+      if (request.method === "PATCH" && pathname === "/api/admin/settings") {
+        assertSameOrigin(request);
+        const admin = requireAdmin(request, response, database, config);
+        if (!admin) return;
+        const body = await readJson(request);
+        sendJson(response, 200, { app: saveAppSettings(database, body) });
+        return;
+      }
+
       if (request.method === "GET" && pathname === "/api/admin/licenses") {
         const admin = requireAdmin(request, response, database, config);
         if (!admin) return;
@@ -366,6 +437,7 @@ export function createApp(overrides = {}) {
         if (!admin) return;
         const body = await readJson(request);
         const label = String(body.label ?? "").trim().slice(0, 100);
+        const role = body.role === "developer" ? "developer" : "customer";
         const deviceLimit = Number(body.deviceLimit ?? 1);
         const expiresInDays = body.expiresInDays === null ? null : Number(body.expiresInDays ?? 30);
         if (!Number.isInteger(deviceLimit) || deviceLimit < 1 || deviceLimit > 20) {
@@ -385,14 +457,15 @@ export function createApp(overrides = {}) {
         const id = randomUUID();
         database.prepare(`
           INSERT INTO licenses
-            (id, key_hash, key_value, key_last4, label, status, expires_at, device_limit, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+            (id, key_hash, key_value, key_last4, label, status, role, expires_at, device_limit, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
         `).run(
           id,
           hashLicenseKey(licenseKey, config.licensePepper),
           licenseKey,
           licenseKey.slice(-4),
           label,
+          role,
           expiresAt,
           deviceLimit,
           createdAt,
@@ -436,11 +509,16 @@ export function createApp(overrides = {}) {
         }
         const body = await readJson(request);
         const status = body.status ?? current.status;
+        const role = body.role === undefined ? current.role : body.role;
         const label = body.label === undefined ? current.label : String(body.label).trim().slice(0, 100);
         const deviceLimit = body.deviceLimit === undefined ? current.device_limit : Number(body.deviceLimit);
         const expiresAt = body.expiresAt === undefined ? current.expires_at : body.expiresAt;
         if (!["active", "revoked"].includes(status)) {
           apiError(response, 400, "INVALID_STATUS", "Status must be active or revoked");
+          return;
+        }
+        if (!["customer", "developer"].includes(role)) {
+          apiError(response, 400, "INVALID_ROLE", "Role must be customer or developer");
           return;
         }
         if (!Number.isInteger(deviceLimit) || deviceLimit < 1 || deviceLimit > 20) {
@@ -453,9 +531,9 @@ export function createApp(overrides = {}) {
         }
         database.prepare(`
           UPDATE licenses
-          SET label = ?, status = ?, expires_at = ?, device_limit = ?, updated_at = ?
+          SET label = ?, status = ?, role = ?, expires_at = ?, device_limit = ?, updated_at = ?
           WHERE id = ?
-        `).run(label, status, expiresAt, deviceLimit, nowIso(), id);
+        `).run(label, status, role, expiresAt, deviceLimit, nowIso(), id);
         if (status === "revoked") {
           database.prepare("DELETE FROM license_sessions WHERE license_id = ?").run(id);
         }
@@ -548,6 +626,7 @@ export function createApp(overrides = {}) {
           sessionExpiresAt,
           licenseExpiresAt: license.expires_at,
           deviceLimit: license.device_limit,
+          role: license.role ?? "customer",
         });
         return;
       }
@@ -559,7 +638,7 @@ export function createApp(overrides = {}) {
           return;
         }
         const session = database.prepare(`
-          SELECT license_sessions.*, licenses.status, licenses.expires_at AS license_expires_at,
+          SELECT license_sessions.*, licenses.status, licenses.role, licenses.expires_at AS license_expires_at,
                  licenses.device_limit
           FROM license_sessions
           JOIN licenses ON licenses.id = license_sessions.license_id
@@ -583,6 +662,7 @@ export function createApp(overrides = {}) {
           sessionExpiresAt: session.expires_at,
           licenseExpiresAt: session.license_expires_at,
           deviceLimit: session.device_limit,
+          role: session.role ?? "customer",
         });
         return;
       }
